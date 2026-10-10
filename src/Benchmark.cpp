@@ -5,21 +5,9 @@ namespace lap_timer {
 constexpr std::size_t kSampleCount = 50;
 using Sample = SensorSample;
 void Benchmark::capture(SensorReader& reader) {
-  samples_ = {};
-  batchError_ = SampleStatus::Ok;
-  auto pending = reader.collectSample();
-  if (pending.status != SampleStatus::Ok) {
-    samples_[0] = pending;
-    batchError_ = pending.status;
-    return;
-  }
-  vTaskDelay(1);
-  for (auto& sample : samples_) {
-    sample = reader.collectSample();
-    if (sample.status != SampleStatus::Ok) {
-      batchError_ = sample.status;
-      break;
-    }
+  begin();
+  while (!done()) {
+    consume(reader.collectSample());
     vTaskDelay(1);
   }
 }
@@ -50,6 +38,9 @@ struct Statistics {
 };
 
 void Benchmark::printResults(Stream& output, const SensorReader& reader) const {
+  const auto& samples_ = samples();
+  const auto result = summary();
+  const auto batchError_ = result.error;
   Statistics durations;
   Statistics intervals;
   size_t successful = 0;
@@ -60,6 +51,8 @@ void Benchmark::printResults(Stream& output, const SensorReader& reader) const {
   output.println("# timestamps: microseconds since boot; read_end = API return time");
   output.println("# read_duration is API wait/read time, not sensor integration time");
   output.println("# OK = no detected acquisition error; range quality is unavailable");
+  output.println("# task_yield_ticks=1; conditions differ from the original single loop");
+  if (result.preparationFailed) output.println("# error: BENCH_PREP_TIMEOUT");
   if (batchError_ != SampleStatus::Ok) output.printf("# error: %s\n", sampleStatusName(batchError_));
   output.println("index,read_start_us,read_end_us,read_duration_us,interval_us,distance_mm,status");
   for (size_t i = 0; i < kSampleCount; ++i) {
@@ -94,7 +87,7 @@ void Benchmark::printResults(Stream& output, const SensorReader& reader) const {
   durations.print(output, "read_duration");
   // First sample has no interval and does not affect the period summary.
   intervals.print(output, "interval");
-  output.println("# Reset device to return.");
+  output.println("# A: measure again; reset device to return.");
 }
 
 }  // namespace lap_timer

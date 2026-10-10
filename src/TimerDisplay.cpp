@@ -127,6 +127,56 @@ void TimerDisplay::renderLcd(const DisplayModel& model) {
   drawn_ = true;
 }
 
+void TimerDisplay::renderBenchmarkPreparing() {
+  auto& lcd = M5.Display;
+  lcd.setRotation(1);
+  lcd.fillScreen(kBackground);
+  font(true);
+  lcd.setTextColor(kText);
+  lcd.drawString("周期測定中", 12, 8);
+  lcd.drawString("50回分をRAMへ記録します", 12, 52);
+  lcd.drawString("測定中は画面更新を停止", 12, 80);
+  lcd.drawString("A: 終了後の再測定を予約", 12, 190);
+  lcd.drawString("本体リセットで通常画面へ", 12, 220);
+}
+void TimerDisplay::renderBenchmarkResult(const BenchmarkSummary& summary) {
+  auto& lcd = M5.Display;
+  lcd.fillScreen(kBackground);
+  font(true);
+  lcd.setTextColor(0x68b8ff);
+  lcd.drawString("周期測定終了", 12, 8);
+  lcd.setTextColor(kText);
+  char text[64];
+  std::snprintf(text, sizeof(text), "取得 %u/50  成功 %u",
+      static_cast<unsigned>(summary.attempted), static_cast<unsigned>(summary.successful));
+  lcd.drawString(text, 12, 42);
+  lcd.setTextColor(kMuted);
+  lcd.drawString("取得間隔（単位 ms）", 12, 72);
+  const char* labels[] = {"MIN", "MEAN", "MAX"};
+  for (int i = 0; i < 3; ++i) {
+    font(false);
+    lcd.setTextColor(kText);
+    lcd.drawString(labels[i], 12, 102 + i * 28);
+    if (summary.intervals.count == 0) std::snprintf(text, sizeof(text), "--.--");
+    else {
+      const double value = i == 0 ? summary.intervals.minimum :
+          i == 1 ? summary.intervals.mean() : summary.intervals.maximum;
+      std::snprintf(text, sizeof(text), "%.2f", value / 1000.0);
+    }
+    numericText(text, 306, 98 + i * 28, 220, 2);
+  }
+  font(false);
+  lcd.setTextColor(summary.preparationFailed || summary.error != SampleStatus::Ok ?
+                   0xff7d85 : kMuted);
+  lcd.drawString(summary.preparationFailed ? "BENCH_PREP_TIMEOUT" :
+      summary.error == SampleStatus::Ok ? "CSV: Serial" : sampleStatusName(summary.error), 12, 192);
+  lcd.fillRect(0, 216, 108, 24, 0x273e59);
+  font(true);
+  lcd.setTextColor(kText);
+  lcd.drawString("A 再測定", 8, 222);
+  lcd.drawString("本体リセットで復帰", 118, 222);
+}
+
 void TimerDisplay::outputBaseline(Stream& output, const DisplayModel& model) const {
   char distance[20];
   if (!formatBaselineDistance(model, distance, sizeof(distance))) return;
