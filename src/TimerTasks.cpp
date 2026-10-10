@@ -1,5 +1,6 @@
 #include "TimerTasks.h"
 #include "MeasurementFlow.h"
+#include "TimerDisplay.h"
 #include <M5Unified.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -77,84 +78,51 @@ void inputTask(void*) {
     vTaskDelayUntil(&wake, ticks(10));
   }
 }
-const char* stateName(State state) {
-  switch (state) {
-    case State::Idle: return "IDLE";
-    case State::Calibrating: return "CALIBRATING";
-    case State::Armed: return "ARMED";
-    case State::Running: return "RUNNING";
-    case State::Complete: return "COMPLETE";
-    default: return "ERROR";
-  }
-}
-const char* errorName(Error error) {
-  switch (error) {
-    case Error::None: return "NONE";
-    case Error::SensorInit: return "SENSOR_INIT";
-    case Error::SensorConfig: return "SENSOR_CONFIG";
-    case Error::SensorTimeout: return "SENSOR_TIMEOUT";
-    case Error::SensorI2c: return "SENSOR_I2C";
-    default: return "SENSOR_READ";
-  }
-}
-void printSeconds(std::uint64_t us) {
-  const auto hundredths = us / 10000;
-  Serial.printf("%llu.%02u", static_cast<unsigned long long>(hundredths / 100),
-                static_cast<unsigned>(hundredths % 100));
-}
-void printDiagnostic(const TimerContext& context) {
-  const auto elapsed = context.state == State::Running
-      ? SensorReader::nowUs() - context.startUs : context.frozenElapsedUs;
-  Serial.printf("STATE=%s SESSION=%llu LAP=%u/10 CAL=%u/10 ELAPSED=",
-                stateName(context.state), static_cast<unsigned long long>(context.generation),
-                static_cast<unsigned>(context.lapCount),
-                static_cast<unsigned>(context.calibrationCount));
-  printSeconds(elapsed);
-  Serial.printf(" s ERROR=%s\n", errorName(context.error));
-  for (std::size_t i = 0; i < context.lapCount; ++i) {
-    Serial.printf("LAP %u: ", static_cast<unsigned>(i + 1));
-    printSeconds(context.laps[i].lapUs);
-    Serial.print(" s TOTAL=");
-    printSeconds(context.laps[i].elapsedUs);
-    Serial.println(" s");
-  }
-}
 void presentationTask(void*) {
   waitForStart();
   TimerContext snapshot;
+  TimerDisplay display;
+  /* Debug lap output: uncomment these declarations and the block below.
+  DisplayModel lastSerialModel;
+  bool serialSent = false;
+  */
+  bool baselineLogged = false;
+  std::uint64_t loggedGeneration = 0;
   bool haveSnapshot = false;
-  bool dirty = false;
-  bool haveScreen = false;
-  State screenState = State::Idle;
-  Error screenError = Error::None;
-  TickType_t lastSerial = xTaskGetTickCount() - ticks(500);
+  auto lastLcd = xTaskGetTickCount() - ticks(50);
+  auto lastSerial = xTaskGetTickCount() - ticks(500);
   for (;;) {
     TimerContext received;
-    if (xQueueReceive(displayQueue, &received, ticks(50)) == pdTRUE) {
+    // Sleep until the next LCD deadline even when snapshots arrive rapidly.
+    const auto current = xTaskGetTickCount();
+    const auto age = current - lastLcd;
+    if (age < ticks(50)) vTaskDelay(ticks(50) - age);
+    if (xQueueReceive(displayQueue, &received, 0) == pdTRUE) {
       snapshot = received;
       haveSnapshot = true;
-      dirty = true;
     }
-    if (!haveSnapshot) continue;
-    if (!haveScreen || screenState != snapshot.state || screenError != snapshot.error) {
-      M5.Display.fillScreen(BLACK);
-      M5.Display.setCursor(0, 0);
-      M5.Display.setTextSize(2);
-      M5.Display.println("Lap timer - stage 2");
-      M5.Display.println(stateName(snapshot.state));
-      M5.Display.println(errorName(snapshot.error));
-      M5.Display.println("See serial diagnostics.");
-      M5.Display.println(snapshot.state == State::Idle ? "A: Start" : "A: Reset");
-      screenState = snapshot.state;
-      screenError = snapshot.error;
-      haveScreen = true;
-    }
+    if (!haveSnapshot) { vTaskDelay(ticks(50)); continue; }
+    const auto model = makeDisplayModel(snapshot, SensorReader::nowUs());
+    display.renderLcd(model);
+    // Start spacing after rendering to avoid catch-up bursts after slow output.
+    lastLcd = xTaskGetTickCount();
     const auto now = xTaskGetTickCount();
-    if ((dirty || snapshot.state == State::Running) && now - lastSerial >= ticks(500)) {
-      printDiagnostic(snapshot);
-      lastSerial = now;
-      dirty = false;
+    if (model.baselineReady && (!baselineLogged || loggedGeneration != model.generation) &&
+        now - lastSerial >= ticks(500)) {
+      display.outputBaseline(Serial, model);
+      loggedGeneration = model.generation;
+      baselineLogged = true;
+      lastSerial = xTaskGetTickCount();
     }
+    /* Debug lap output: retained for occasional diagnostics.
+    if ((!serialSent || !sameDisplayModel(model, lastSerialModel)) &&
+        xTaskGetTickCount() - lastSerial >= ticks(500)) {
+      display.outputSerial(Serial, model);
+      lastSerialModel = model;
+      serialSent = true;
+      lastSerial = xTaskGetTickCount();
+    }
+    */
   }
 }
 void releaseResources() {
