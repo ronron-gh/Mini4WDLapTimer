@@ -137,7 +137,7 @@ void TimerDisplay::renderBenchmarkPreparing() {
   lcd.drawString("50回分をRAMへ記録します", 12, 52);
   lcd.drawString("測定中は画面更新を停止", 12, 80);
   lcd.drawString("A: 終了後の再測定を予約", 12, 190);
-  lcd.drawString("本体リセットで通常画面へ", 12, 220);
+  lcd.drawString("通常へは別ビルドを書き込み", 12, 220);
 }
 void TimerDisplay::renderBenchmarkResult(const BenchmarkSummary& summary) {
   auto& lcd = M5.Display;
@@ -174,7 +174,7 @@ void TimerDisplay::renderBenchmarkResult(const BenchmarkSummary& summary) {
   font(true);
   lcd.setTextColor(kText);
   lcd.drawString("A 再測定", 8, 222);
-  lcd.drawString("本体リセットで復帰", 118, 222);
+  lcd.drawString("リセットで自動再測定", 118, 222);
 }
 
 void TimerDisplay::outputBaseline(Stream& output, const DisplayModel& model) const {

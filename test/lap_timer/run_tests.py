@@ -16,11 +16,11 @@ def main():
     root = pathlib.Path(__file__).resolve().parents[2]
     output = root / ".pio" / "host-tests"
     output.mkdir(parents=True, exist_ok=True)
-    for suite in ["lap_timer", "measurement_flow", "display_model", "hidden_benchmark"]:
+    for suite in ["lap_timer", "measurement_flow", "display_model", "benchmark_session"]:
         binary = output / (suite + (".exe" if sys.platform == "win32" else ""))
         command = [str(compiler), "-std=c++11", "-Wall", "-Wextra", "-Werror",
                    "-I" + str(root / "include"), str(root / "src" / "LapTimer.cpp"), str(root / "src" / "DisplayModel.cpp"),
-                   str(root / "src" / "HiddenBenchmark.cpp"), str(root / "src" / "BenchmarkData.cpp"),
+                   str(root / "src" / "BenchmarkSession.cpp"), str(root / "src" / "BenchmarkData.cpp"),
                    str(root / "test" / suite / "test_main.cpp"), "-o", str(binary)]
         subprocess.run(command, cwd=root, check=True)
         subprocess.run([str(binary)], cwd=root, check=True)

@@ -87,7 +87,7 @@ void Benchmark::printResults(Stream& output, const SensorReader& reader) const {
   durations.print(output, "read_duration");
   // First sample has no interval and does not affect the period summary.
   intervals.print(output, "interval");
-  output.println("# A: measure again; reset device to return.");
+  output.println("# A: measure again; reset repeats benchmark; upload normal build to return.");
 }
 
 }  // namespace lap_timer

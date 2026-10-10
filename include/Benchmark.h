@@ -3,7 +3,7 @@
 #include <Stream.h>
 #include "SensorReader.h"
 #include "BenchmarkData.h"
-#include "HiddenAcquisition.h"
+#include "BenchmarkAcquisition.h"
 namespace lap_timer {
 class Benchmark {
  public:
@@ -11,8 +11,8 @@ class Benchmark {
   void capture(SensorReader& reader);
   void begin() { data_.begin(); }
   void consume(const SensorSample& sample) { data_.consume(sample); }
-  bool processSample(HiddenBenchmark& hidden, const SensorSample& sample, bool aPressed) {
-    return processHiddenSample(hidden, data_, sample, aPressed);
+  bool processSample(BenchmarkSession& session, const SensorSample& sample, bool aPressed) {
+    return processBenchmarkSample(session, data_, sample, aPressed);
   }
   void failPreparation() { data_.failPreparation(); }
   bool done() const { return data_.done(); }

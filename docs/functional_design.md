@@ -324,3 +324,41 @@ BenchmarkDataは読み捨て1件と50件の逐次取得・異常終了・集計�
 ### 第4段階の実機不具合修正
 
 A再測定でBENCH_PREP_TIMEOUTと全50行NOT_RUNを実機確認。取得後に処理するAがFinished→Preparingを起こした経路でスナップショットの発行が漏れていた。取得後の専用処理をprocessHiddenSample()へ切り出し、モードまたは実行番号の変更時にtrueを返す。測定タスクはこの戻り値で必ずpublish()する。回帰テストは取得後A操作、静止ACK、再度50件の捕捉までをこの本番処理で検証する。要求とセンサー設定は変更しない。
+
+## 18. コンパイル時切り替えへの変更案
+
+ユーザーの方針変更に合わせ、第4節・第8節・第17節の実行時C長押し切り替えを以下で置き換える。レビュー承認後に実装済み。以降のビルド選択を現行構成とし、旧節のC長押し・Hidden系の記述は過去の設計として扱う。
+
+### ビルド環境
+
+| PlatformIO環境 | マクロ | 起動動作 |
+| --- | --- | --- |
+| m5stack-core-esp32 | LAP_TIMER_BENCHMARK_MODE=0 | 通常待機 |
+| m5stack-core-esp32-benchmark | LAP_TIMER_BENCHMARK_MODE=1 | 自動50回測定 |
+
+既存環境名を維持し、default_envsは通常環境とする。platform・board・framework・lib_deps・monitor_speedは共通設定へ集約する。マクロは0/1を検証し、未定義時は0。build_src_filterで選択するタスク実装を限定する。
+
+### 分離する処理
+
+- 共通：M5/Serial/センサーの一度だけの初期化、3タスクの作成、開始ゲート、Aボタン入力。各タスクのコア・優先度・スタックは維持する。
+- 通常：LapTimerTasks.cppに測定・表示ループを置く。通常ループはA、取得結果、中核更新、スナップショット配信だけを扱い、ベンチマーク状態やACKを持たない。
+- ベンチマーク：BenchmarkTasks.cppに準備・捕捉・結果出力・A再測定のループを置く。通常計測の状態・基準距離・C長押し判定は使わない。
+- TimerTasks.cppは共通の起動と入力処理を担当する。モードマクロの条件分岐はビルド選択・起動部分へ集約し、センサー取得ループ内に繰り返し置かない。
+- ビルドに選ばれないタスク実装はソースフィルタで除外する。共通型と表示ヘルパーは必要な範囲を共有し、共有目的だけでモード分岐を増やさない。
+
+### ベンチマーク専用の同期
+
+起動時に準備要求→表示静止ACK→読み捨て→50件記録→結果出力→出力完了ACK→A待ち、という順序を専用ループ内にまとめる。結果配列は出力完了まで固定し、A予約は最大1回。実行番号による遅延ACK排除、準備タイムアウト、1tick待ち、捕捉中の出力停止は維持する。
+
+専用タスクを追加してセンサー所有権を移す方式は採用しない。選択された測定タスクだけがセンサーを使う。通常のコードから隠し機能への移行状態、Cイベント、HiddenHoldを除去する。
+
+### 操作と検証
+
+通常はpio run / pio run -t upload。ベンチマークはpio run -e m5stack-core-esp32-benchmark、書き込みは同じ環境に-t uploadを指定する。ソースを書き換えず環境選択で切り替える。両環境のビルド、通常計測の回帰、起動直後の自動測定、A再測定、出力中の配列保持を検証する。
+
+
+### ビルド選択の具体化
+
+TaskRuntimeはセンサー参照・表示キュー・任意のACKキュー・開始ゲート・タスクハンドルを保持する。選択されたLapTimerTasks.cppまたはBenchmarkTasks.cppだけがconfigureModeTasks/measurementTask/presentationTaskを定義し、共通TimerTasks.cppは同じインターフェースから起動する。通常ビルドではACKキューを作らない。BenchmarkSessionはNormal状態とC入力を持たず、startで最初の準備へ入り、A再測定・ACK・タイムアウトだけを管理する。C長押しと旧Hidden系ファイルは除去する。
+
+実装確認：通常ELFにBenchmarkSession/Benchmark/renderBenchmarkのシンボルなし。ベンチマークELFにLapTimerのシンボルなし。共通TimerTasksにはモード分岐なしで、選択タスク側のstatic_assertでマクロとソースフィルタの整合性を確認する。表示ヘルパーはTimerDisplayに共有して置き、未使用関数はリンク時に除去する。

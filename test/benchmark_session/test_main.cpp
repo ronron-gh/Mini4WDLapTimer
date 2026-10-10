@@ -1,5 +1,5 @@
-#include "HiddenBenchmark.h"
-#include "HiddenAcquisition.h"
+#include "BenchmarkSession.h"
+#include "BenchmarkAcquisition.h"
 #include "BenchmarkData.h"
 #include <cstdio>
 #include <cstdlib>
@@ -17,67 +17,45 @@ static SensorSample reading(unsigned i, SampleStatus status = SampleStatus::Ok) 
   return s;
 }
 int main() {
-  HiddenHold hold;
-  CHECK(!hold.update(true, true, 1, 0));
-  CHECK(!hold.update(true, true, 1, 2999000));
-  CHECK(hold.update(true, true, 1, 3000000));
-  CHECK(!hold.update(true, true, 1, 4000000));
-  CHECK(!hold.update(false, true, 1, 4000001));
-  CHECK(!hold.update(true, false, 1, 5000000));
-  CHECK(!hold.update(true, true, 1, 9000000)); // Started outside idle.
-  hold.update(false, true, 1, 9000001);
-  hold.update(true, true, 1, 10000000);
-  CHECK(!hold.update(true, true, 2, 13000000)); // Generation change.
-  CHECK(!hold.update(true, true, 1, 14000000));
-  hold.update(false, true, 1, 15000000);
-  hold.update(true, true, 1, 16000000);
-  CHECK(!hold.update(true, false, 1, 17000000)); // A cancels eligibility.
-  CHECK(!hold.update(true, true, 1, 20000000));
-  HiddenBenchmark mode;
-  mode.request(true, true, true, 0);
-  CHECK(mode.mode() == HiddenMode::Normal); // A wins.
-  mode.request(false, true, false, 1);
-  CHECK(mode.mode() == HiddenMode::Normal);
-  mode.request(false, true, true, 2);
-  CHECK(mode.mode() == HiddenMode::Preparing);
-  CHECK(mode.run() == 1);
+  BenchmarkSession mode;
+  mode.start(2);
+  CHECK(mode.mode() == BenchmarkPhase::Preparing && mode.run() == 1);
   BenchmarkAck ack;
   ack.kind = BenchmarkAckKind::Quiet; ack.run = 0;
   mode.acknowledge(ack, 3);
-  CHECK(mode.mode() == HiddenMode::Preparing);
-  mode.request(true, false, false, 4);
+  CHECK(mode.mode() == BenchmarkPhase::Preparing);
+  mode.requestAgain(true, 4);
   ack.run = 1;
   mode.acknowledge(ack, 5);
-  CHECK(mode.mode() == HiddenMode::Capturing);
-  mode.request(true, false, false, 6); // Multiple requests collapse.
+  CHECK(mode.mode() == BenchmarkPhase::Capturing);
+  mode.requestAgain(true, 6);
   mode.captureDone();
-  CHECK(mode.mode() == HiddenMode::Results);
-  mode.request(true, false, false, 7);
-  CHECK(mode.mode() == HiddenMode::Results); // Cannot overwrite output.
+  CHECK(mode.mode() == BenchmarkPhase::Results);
+  mode.requestAgain(true, 7);
+  CHECK(mode.mode() == BenchmarkPhase::Results);
   ack.kind = BenchmarkAckKind::OutputDone;
   mode.acknowledge(ack, 8);
-  CHECK(mode.mode() == HiddenMode::Preparing && mode.run() == 2);
+  CHECK(mode.mode() == BenchmarkPhase::Preparing && mode.run() == 2);
   ack.kind = BenchmarkAckKind::Quiet; ack.run = 1;
   mode.acknowledge(ack, 9);
-  CHECK(mode.mode() == HiddenMode::Preparing); // Stale ACK ignored.
+  CHECK(mode.mode() == BenchmarkPhase::Preparing);
   ack.run = 2;
   mode.acknowledge(ack, 10);
   mode.captureDone();
   ack.kind = BenchmarkAckKind::OutputDone;
   mode.acknowledge(ack, 11);
-  CHECK(mode.mode() == HiddenMode::Finished);
-  mode.request(false, true, false, 12);
-  CHECK(mode.mode() == HiddenMode::Finished);
-  mode.request(true, false, false, 13);
-  CHECK(mode.mode() == HiddenMode::Preparing && mode.run() == 3);
+  CHECK(mode.mode() == BenchmarkPhase::Finished);
+  mode.requestAgain(false, 12);
+  CHECK(mode.mode() == BenchmarkPhase::Finished);
+  mode.requestAgain(true, 13);
+  CHECK(mode.mode() == BenchmarkPhase::Preparing && mode.run() == 3);
   mode.poll(2000012);
-  CHECK(mode.mode() == HiddenMode::Preparing);
+  CHECK(mode.mode() == BenchmarkPhase::Preparing);
   mode.poll(2000013);
-  CHECK(mode.mode() == HiddenMode::Results && mode.preparationFailed());
+  CHECK(mode.mode() == BenchmarkPhase::Results && mode.preparationFailed());
   ack.kind = BenchmarkAckKind::Quiet; ack.run = 3;
   mode.acknowledge(ack, 2000014);
-  CHECK(mode.mode() == HiddenMode::Results);
-
+  CHECK(mode.mode() == BenchmarkPhase::Results);
   BenchmarkData data;
   data.begin();
   data.consume(reading(0)); // Discard.
@@ -115,35 +93,35 @@ int main() {
   CHECK(data.summary().durations.count == 0);
   for (const auto& s : data.samples()) CHECK(s.status == SampleStatus::NotRun);
   // Regression: A arrives after the sensor API returns while in Finished.
-  HiddenBenchmark flow;
+  BenchmarkSession flow;
   BenchmarkData buffer;
-  flow.request(false, true, true, 0);
+  flow.start(0);
   BenchmarkAck quiet;
   quiet.kind = BenchmarkAckKind::Quiet; quiet.run = flow.run();
   flow.acknowledge(quiet, 1);
   buffer.begin();
   for (unsigned i = 0; i <= 50; ++i) {
-    const bool notify = processHiddenSample(flow, buffer, reading(i), false);
+    const bool notify = processBenchmarkSample(flow, buffer, reading(i), false);
     CHECK(notify == (i == 50));
   }
-  CHECK(flow.mode() == HiddenMode::Results);
+  CHECK(flow.mode() == BenchmarkPhase::Results);
   BenchmarkAck printed;
   printed.kind = BenchmarkAckKind::OutputDone; printed.run = flow.run();
   flow.acknowledge(printed, reading(50).readEndUs + 1);
-  CHECK(flow.mode() == HiddenMode::Finished);
+  CHECK(flow.mode() == BenchmarkPhase::Finished);
   const auto restart = reading(100);
-  CHECK(processHiddenSample(flow, buffer, restart, true)); // Must publish Preparing.
-  CHECK(flow.mode() == HiddenMode::Preparing && flow.run() == 2);
+  CHECK(processBenchmarkSample(flow, buffer, restart, true)); // Must publish Preparing.
+  CHECK(flow.mode() == BenchmarkPhase::Preparing && flow.run() == 2);
   CHECK(buffer.summary().successful == 50); // Old results stay fixed until quiet ACK.
   quiet.run = flow.run();
   flow.acknowledge(quiet, restart.readEndUs + 1);
-  CHECK(flow.mode() == HiddenMode::Capturing);
+  CHECK(flow.mode() == BenchmarkPhase::Capturing);
   buffer.begin();
   for (unsigned i = 101; i <= 151; ++i)
-    processHiddenSample(flow, buffer, reading(i), false);
-  CHECK(flow.mode() == HiddenMode::Results);
+    processBenchmarkSample(flow, buffer, reading(i), false);
+  CHECK(flow.mode() == BenchmarkPhase::Results);
   CHECK(!flow.preparationFailed());
   CHECK(buffer.summary().successful == 50);
   CHECK(buffer.samples()[49].status == SampleStatus::Ok);
-  std::printf("PASS: hidden benchmark, %u checks\n", checks);
+  std::printf("PASS: benchmark session, %u checks\n", checks);
 }

@@ -1,0 +1,7 @@
+#pragma once
+#ifndef LAP_TIMER_BENCHMARK_MODE
+#define LAP_TIMER_BENCHMARK_MODE 0
+#endif
+#if LAP_TIMER_BENCHMARK_MODE != 0 && LAP_TIMER_BENCHMARK_MODE != 1
+#error "LAP_TIMER_BENCHMARK_MODE must be 0 or 1"
+#endif
