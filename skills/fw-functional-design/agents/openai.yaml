@@ -1,0 +1,4 @@
+interface:
+  display_name: "FW機能設計書"
+  short_description: "固定した章構成でFW機能設計書を作成・整理し、追加機能を体系的に反映する"
+  default_prompt: "$fw-functional-design を使って、要求仕様と現行実装に沿う機能設計書を作成・更新してください。"
